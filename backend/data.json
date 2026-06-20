@@ -1,0 +1,17 @@
+{
+  "users": [
+    {
+      "id": "admin_root",
+      "name": "Admin",
+      "designation": "Agency Owner",
+      "username": "admin",
+      "password": "$2a$10$2xwhrCoz/MWS1jqGocrr1OeZmAHBT.wvLcq/HCQNnIMMXHN6XKpvy",
+      "isAdmin": true,
+      "teamMemberId": ""
+    }
+  ],
+  "clients": [],
+  "income": [],
+  "expenses": [],
+  "team": []
+}

@@ -1,0 +1,292 @@
+const express = require("express");
+const cors    = require("cors");
+const jwt     = require("jsonwebtoken");
+const bcrypt  = require("bcryptjs");
+const { store, save } = require("./db");
+
+const app        = express();
+const PORT       = 3001;
+const JWT_SECRET = "samadhan_jwt_secret_2024";
+
+app.use(cors({ origin: "http://localhost:5173", credentials: true }));
+app.use(express.json());
+
+// ══════════════════════════════════════════════════════════════
+//  MIDDLEWARE
+// ══════════════════════════════════════════════════════════════
+function auth(req, res, next) {
+  const token = req.headers.authorization?.split(" ")[1];
+  if (!token) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    req.user = jwt.verify(token, JWT_SECRET);
+    next();
+  } catch {
+    res.status(401).json({ error: "Invalid or expired token" });
+  }
+}
+
+function adminOnly(req, res, next) {
+  if (!req.user?.isAdmin)
+    return res.status(403).json({ error: "Admin access required" });
+  next();
+}
+
+// ── Helper: strip password before sending user to client ──────
+function safeUser(u) {
+  const { password, ...rest } = u;
+  return rest;
+}
+
+// ── Helper: find index or return 404 ─────────────────────────
+function findOrFail(res, collection, id) {
+  const idx = store[collection].findIndex((x) => x.id === id);
+  if (idx === -1) { res.status(404).json({ error: "Not found" }); return -1; }
+  return idx;
+}
+
+// ══════════════════════════════════════════════════════════════
+//  AUTH
+// ══════════════════════════════════════════════════════════════
+app.post("/api/auth/login", (req, res) => {
+  const { username, password } = req.body || {};
+  if (!username || !password)
+    return res.status(400).json({ error: "Username and password required" });
+
+  const user = store.users.find((u) => u.username === username);
+  if (!user || !bcrypt.compareSync(password, user.password))
+    return res.status(401).json({ error: "Incorrect username or password" });
+
+  const payload = safeUser(user);
+  const token   = jwt.sign(payload, JWT_SECRET, { expiresIn: "7d" });
+  res.json({ token, user: payload });
+});
+
+// ══════════════════════════════════════════════════════════════
+//  DATA  — single endpoint: returns all collections at once
+// ══════════════════════════════════════════════════════════════
+app.get("/api/data", auth, (req, res) => {
+  res.json({
+    clients:  store.clients,
+    income:   store.income,
+    expenses: store.expenses,
+    team:     store.team,
+  });
+});
+
+// ══════════════════════════════════════════════════════════════
+//  CLIENTS
+// ══════════════════════════════════════════════════════════════
+app.post("/api/clients", auth, adminOnly, (req, res) => {
+  const client = {
+    id: req.body.id, name: req.body.name,
+    services: req.body.services || "", source: req.body.source || "Other",
+    billingType: req.body.billingType || "retainer",
+    amount: Number(req.body.amount) || 0,
+    dueDate: req.body.dueDate || "", dueDay: req.body.dueDay || 1,
+    active: req.body.active !== false,
+    projectManagerId: req.body.projectManagerId || "",
+    teamIds: req.body.teamIds || [],
+    paid: req.body.paid || {},
+  };
+  store.clients.push(client);
+  save();
+  res.status(201).json(client);
+});
+
+app.put("/api/clients/:id", auth, adminOnly, (req, res) => {
+  const idx = findOrFail(res, "clients", req.params.id);
+  if (idx === -1) return;
+  store.clients[idx] = {
+    ...store.clients[idx],
+    name:             req.body.name,
+    services:         req.body.services         || "",
+    source:           req.body.source           || "Other",
+    billingType:      req.body.billingType,
+    amount:           Number(req.body.amount)   || 0,
+    dueDate:          req.body.dueDate          || "",
+    dueDay:           req.body.dueDay           || 1,
+    active:           req.body.active           !== false,
+    projectManagerId: req.body.projectManagerId || "",
+    teamIds:          req.body.teamIds          || [],
+    paid:             req.body.paid             || {},
+  };
+  save();
+  res.json(store.clients[idx]);
+});
+
+app.delete("/api/clients/:id", auth, adminOnly, (req, res) => {
+  const idx = findOrFail(res, "clients", req.params.id);
+  if (idx === -1) return;
+  store.clients.splice(idx, 1);
+  save();
+  res.json({ ok: true });
+});
+
+// ══════════════════════════════════════════════════════════════
+//  INCOME
+// ══════════════════════════════════════════════════════════════
+app.post("/api/income", auth, (req, res) => {
+  const item = {
+    id: req.body.id, type: req.body.type || "", label: req.body.label || "",
+    amount: Number(req.body.amount) || 0, date: req.body.date || "",
+    clientId: req.body.clientId || "", period: req.body.period || "",
+  };
+  store.income.unshift(item);          // newest first
+  save();
+  res.status(201).json(item);
+});
+
+app.put("/api/income/:id", auth, adminOnly, (req, res) => {
+  const idx = findOrFail(res, "income", req.params.id);
+  if (idx === -1) return;
+  store.income[idx] = {
+    ...store.income[idx],
+    type: req.body.type || "", label: req.body.label || "",
+    amount: Number(req.body.amount) || 0, date: req.body.date || "",
+  };
+  save();
+  res.json(store.income[idx]);
+});
+
+app.delete("/api/income/:id", auth, adminOnly, (req, res) => {
+  const idx = findOrFail(res, "income", req.params.id);
+  if (idx === -1) return;
+  store.income.splice(idx, 1);
+  save();
+  res.json({ ok: true });
+});
+
+// ══════════════════════════════════════════════════════════════
+//  EXPENSES
+// ══════════════════════════════════════════════════════════════
+app.post("/api/expenses", auth, (req, res) => {
+  const item = {
+    id: req.body.id, type: req.body.type || "", label: req.body.label || "",
+    amount: Number(req.body.amount) || 0, date: req.body.date || "",
+  };
+  store.expenses.unshift(item);
+  save();
+  res.status(201).json(item);
+});
+
+app.put("/api/expenses/:id", auth, adminOnly, (req, res) => {
+  const idx = findOrFail(res, "expenses", req.params.id);
+  if (idx === -1) return;
+  store.expenses[idx] = {
+    ...store.expenses[idx],
+    type: req.body.type || "", label: req.body.label || "",
+    amount: Number(req.body.amount) || 0, date: req.body.date || "",
+  };
+  save();
+  res.json(store.expenses[idx]);
+});
+
+app.delete("/api/expenses/:id", auth, adminOnly, (req, res) => {
+  const idx = findOrFail(res, "expenses", req.params.id);
+  if (idx === -1) return;
+  store.expenses.splice(idx, 1);
+  save();
+  res.json({ ok: true });
+});
+
+// ══════════════════════════════════════════════════════════════
+//  TEAM
+// ══════════════════════════════════════════════════════════════
+app.post("/api/team", auth, adminOnly, (req, res) => {
+  const member = {
+    id: req.body.id, name: req.body.name,
+    role: req.body.role || "", salary: Number(req.body.salary) || 0,
+    responsibilities: req.body.responsibilities || "",
+  };
+  store.team.push(member);
+  save();
+  res.status(201).json(member);
+});
+
+app.put("/api/team/:id", auth, adminOnly, (req, res) => {
+  const idx = findOrFail(res, "team", req.params.id);
+  if (idx === -1) return;
+  store.team[idx] = {
+    ...store.team[idx],
+    name: req.body.name, role: req.body.role || "",
+    salary: Number(req.body.salary) || 0,
+    responsibilities: req.body.responsibilities || "",
+  };
+  save();
+  res.json(store.team[idx]);
+});
+
+app.delete("/api/team/:id", auth, adminOnly, (req, res) => {
+  const id  = req.params.id;
+  const idx = findOrFail(res, "team", id);
+  if (idx === -1) return;
+  store.team.splice(idx, 1);
+  // Clean up client references
+  store.clients.forEach((c) => {
+    c.teamIds = (c.teamIds || []).filter((x) => x !== id);
+    if (c.projectManagerId === id) c.projectManagerId = "";
+  });
+  save();
+  res.json({ ok: true });
+});
+
+// ══════════════════════════════════════════════════════════════
+//  USERS  (admin only)
+// ══════════════════════════════════════════════════════════════
+app.get("/api/users", auth, adminOnly, (req, res) => {
+  res.json(store.users.map(safeUser));
+});
+
+app.post("/api/users", auth, adminOnly, (req, res) => {
+  const { name, designation, username, password, isAdmin, teamMemberId } = req.body;
+  if (!name || !username || !password)
+    return res.status(400).json({ error: "Name, username and password are required" });
+  if (store.users.find((u) => u.username === username.trim()))
+    return res.status(400).json({ error: "Username already taken" });
+
+  const newUser = {
+    id:           "u_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 5),
+    name, designation: designation || "",
+    username:     username.trim(),
+    password:     bcrypt.hashSync(password, 10),
+    isAdmin:      Boolean(isAdmin),
+    teamMemberId: teamMemberId || "",
+  };
+  store.users.push(newUser);
+  save();
+  res.status(201).json(safeUser(newUser));
+});
+
+app.put("/api/users/:id", auth, adminOnly, (req, res) => {
+  const idx = findOrFail(res, "users", req.params.id);
+  if (idx === -1) return;
+  const { name, designation, username, password, isAdmin, teamMemberId } = req.body;
+  store.users[idx] = {
+    ...store.users[idx],
+    name, designation: designation || "",
+    username: username.trim(),
+    isAdmin: Boolean(isAdmin),
+    teamMemberId: teamMemberId || "",
+    ...(password ? { password: bcrypt.hashSync(password, 10) } : {}),
+  };
+  save();
+  res.json(safeUser(store.users[idx]));
+});
+
+app.delete("/api/users/:id", auth, adminOnly, (req, res) => {
+  if (req.params.id === "admin_root")
+    return res.status(400).json({ error: "Cannot delete the default admin account" });
+  const idx = findOrFail(res, "users", req.params.id);
+  if (idx === -1) return;
+  store.users.splice(idx, 1);
+  save();
+  res.json({ ok: true });
+});
+
+// ══════════════════════════════════════════════════════════════
+//  START
+// ══════════════════════════════════════════════════════════════
+app.listen(PORT, () => {
+  console.log(`\n🚀  Samadhan Agency OS  —  Backend API`);
+  console.log(`    http://localhost:${PORT}\n`);
+});
