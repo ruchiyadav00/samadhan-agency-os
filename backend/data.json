@@ -8,10 +8,53 @@
       "password": "$2a$10$2xwhrCoz/MWS1jqGocrr1OeZmAHBT.wvLcq/HCQNnIMMXHN6XKpvy",
       "isAdmin": true,
       "teamMemberId": ""
+    },
+    {
+      "id": "u_mqmah0o0dht",
+      "name": "ranjan",
+      "designation": "sales executive",
+      "username": "ranjan",
+      "password": "$2a$10$kHKWhxh45XNeAKslmMjKdenXDQQw.SzF4veXXeJ5jsm3f1ZrwB2fa",
+      "isAdmin": false,
+      "teamMemberId": "",
+      "permissions": [
+        "clients"
+      ],
+      "canSeeMoney": false
     }
   ],
-  "clients": [],
+  "clients": [
+    {
+      "id": "mqmapf1y1zjc",
+      "name": "technicsl industry",
+      "services": "MEta ads , seo",
+      "source": "Referral",
+      "billingType": "project",
+      "amount": 600000,
+      "dueDate": "2026-06-20",
+      "dueDay": 1,
+      "active": true,
+      "projectManagerId": "mqmaq2jr6m5d",
+      "teamIds": [
+        "mqmaq2jr6m5d"
+      ],
+      "paid": {},
+      "hasIncentive": true,
+      "incentivePercent": 20,
+      "incentiveSplits": {
+        "mqmaq2jr6m5d": 5
+      }
+    }
+  ],
   "income": [],
   "expenses": [],
-  "team": []
+  "team": [
+    {
+      "id": "mqmaq2jr6m5d",
+      "name": "sanjana",
+      "role": "Manager",
+      "salary": 50000,
+      "responsibilities": ""
+    }
+  ]
 }

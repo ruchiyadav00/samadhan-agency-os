@@ -31,6 +31,17 @@ function adminOnly(req, res, next) {
   next();
 }
 
+// ── Module permission check: admin bypasses everything ────────
+function hasModule(mod) {
+  return (req, res, next) => {
+    if (req.user?.isAdmin || (req.user?.permissions || []).includes(mod))
+      return next();
+    return res.status(403).json({ error: `No access to ${mod}` });
+  };
+}
+
+const canSeeMoney = (user) => !!(user?.isAdmin || user?.canSeeMoney);
+
 // ── Helper: strip password before sending user to client ──────
 function safeUser(u) {
   const { password, ...rest } = u;
@@ -65,18 +76,30 @@ app.post("/api/auth/login", (req, res) => {
 //  DATA  — single endpoint: returns all collections at once
 // ══════════════════════════════════════════════════════════════
 app.get("/api/data", auth, (req, res) => {
+  const seeMoney = canSeeMoney(req.user);
   res.json({
     clients:  store.clients,
-    income:   store.income,
-    expenses: store.expenses,
-    team:     store.team,
+    income:   seeMoney ? store.income   : [],
+    expenses: seeMoney ? store.expenses : [],
+    team:     seeMoney ? store.team : store.team.map(({ salary, ...rest }) => rest),
   });
 });
 
 // ══════════════════════════════════════════════════════════════
 //  CLIENTS
 // ══════════════════════════════════════════════════════════════
-app.post("/api/clients", auth, adminOnly, (req, res) => {
+// ── Helper: clean an incentive split map to numbers, only for given team ids ──
+function cleanSplits(splits, teamIds) {
+  const out = {};
+  if (!splits) return out;
+  (teamIds || []).forEach((id) => {
+    if (splits[id] != null && splits[id] !== "") out[id] = Number(splits[id]) || 0;
+  });
+  return out;
+}
+
+app.post("/api/clients", auth, hasModule("clients"), (req, res) => {
+  const teamIds = req.body.teamIds || [];
   const client = {
     id: req.body.id, name: req.body.name,
     services: req.body.services || "", source: req.body.source || "Other",
@@ -85,17 +108,21 @@ app.post("/api/clients", auth, adminOnly, (req, res) => {
     dueDate: req.body.dueDate || "", dueDay: req.body.dueDay || 1,
     active: req.body.active !== false,
     projectManagerId: req.body.projectManagerId || "",
-    teamIds: req.body.teamIds || [],
+    teamIds,
     paid: req.body.paid || {},
+    hasIncentive: Boolean(req.body.hasIncentive),
+    incentivePercent: Number(req.body.incentivePercent) || 0,
+    incentiveSplits: cleanSplits(req.body.incentiveSplits, teamIds),
   };
   store.clients.push(client);
   save();
   res.status(201).json(client);
 });
 
-app.put("/api/clients/:id", auth, adminOnly, (req, res) => {
+app.put("/api/clients/:id", auth, hasModule("clients"), (req, res) => {
   const idx = findOrFail(res, "clients", req.params.id);
   if (idx === -1) return;
+  const teamIds = req.body.teamIds || [];
   store.clients[idx] = {
     ...store.clients[idx],
     name:             req.body.name,
@@ -107,8 +134,11 @@ app.put("/api/clients/:id", auth, adminOnly, (req, res) => {
     dueDay:           req.body.dueDay           || 1,
     active:           req.body.active           !== false,
     projectManagerId: req.body.projectManagerId || "",
-    teamIds:          req.body.teamIds          || [],
+    teamIds,
     paid:             req.body.paid             || {},
+    hasIncentive:     Boolean(req.body.hasIncentive),
+    incentivePercent: Number(req.body.incentivePercent) || 0,
+    incentiveSplits:  cleanSplits(req.body.incentiveSplits, teamIds),
   };
   save();
   res.json(store.clients[idx]);
@@ -125,7 +155,7 @@ app.delete("/api/clients/:id", auth, adminOnly, (req, res) => {
 // ══════════════════════════════════════════════════════════════
 //  INCOME
 // ══════════════════════════════════════════════════════════════
-app.post("/api/income", auth, (req, res) => {
+app.post("/api/income", auth, hasModule("income"), (req, res) => {
   const item = {
     id: req.body.id, type: req.body.type || "", label: req.body.label || "",
     amount: Number(req.body.amount) || 0, date: req.body.date || "",
@@ -159,7 +189,7 @@ app.delete("/api/income/:id", auth, adminOnly, (req, res) => {
 // ══════════════════════════════════════════════════════════════
 //  EXPENSES
 // ══════════════════════════════════════════════════════════════
-app.post("/api/expenses", auth, (req, res) => {
+app.post("/api/expenses", auth, hasModule("expenses"), (req, res) => {
   const item = {
     id: req.body.id, type: req.body.type || "", label: req.body.label || "",
     amount: Number(req.body.amount) || 0, date: req.body.date || "",
@@ -192,10 +222,11 @@ app.delete("/api/expenses/:id", auth, adminOnly, (req, res) => {
 // ══════════════════════════════════════════════════════════════
 //  TEAM
 // ══════════════════════════════════════════════════════════════
-app.post("/api/team", auth, adminOnly, (req, res) => {
+app.post("/api/team", auth, hasModule("team"), (req, res) => {
   const member = {
     id: req.body.id, name: req.body.name,
-    role: req.body.role || "", salary: Number(req.body.salary) || 0,
+    role: req.body.role || "",
+    salary: req.user.isAdmin ? Number(req.body.salary) || 0 : 0,
     responsibilities: req.body.responsibilities || "",
   };
   store.team.push(member);
@@ -203,13 +234,13 @@ app.post("/api/team", auth, adminOnly, (req, res) => {
   res.status(201).json(member);
 });
 
-app.put("/api/team/:id", auth, adminOnly, (req, res) => {
+app.put("/api/team/:id", auth, hasModule("team"), (req, res) => {
   const idx = findOrFail(res, "team", req.params.id);
   if (idx === -1) return;
   store.team[idx] = {
     ...store.team[idx],
     name: req.body.name, role: req.body.role || "",
-    salary: Number(req.body.salary) || 0,
+    salary: req.user.isAdmin ? (Number(req.body.salary) || 0) : store.team[idx].salary,
     responsibilities: req.body.responsibilities || "",
   };
   save();
@@ -237,8 +268,12 @@ app.get("/api/users", auth, adminOnly, (req, res) => {
   res.json(store.users.map(safeUser));
 });
 
+const MODULES = ["clients", "income", "expenses", "team", "users", "incentive"];
+const cleanPermissions = (arr) =>
+  Array.isArray(arr) ? arr.filter((m) => MODULES.includes(m)) : [];
+
 app.post("/api/users", auth, adminOnly, (req, res) => {
-  const { name, designation, username, password, isAdmin, teamMemberId } = req.body;
+  const { name, designation, username, password, isAdmin, teamMemberId, permissions, canSeeMoney } = req.body;
   if (!name || !username || !password)
     return res.status(400).json({ error: "Name, username and password are required" });
   if (store.users.find((u) => u.username === username.trim()))
@@ -251,6 +286,8 @@ app.post("/api/users", auth, adminOnly, (req, res) => {
     password:     bcrypt.hashSync(password, 10),
     isAdmin:      Boolean(isAdmin),
     teamMemberId: teamMemberId || "",
+    permissions:  cleanPermissions(permissions),
+    canSeeMoney:  Boolean(canSeeMoney),
   };
   store.users.push(newUser);
   save();
@@ -260,13 +297,15 @@ app.post("/api/users", auth, adminOnly, (req, res) => {
 app.put("/api/users/:id", auth, adminOnly, (req, res) => {
   const idx = findOrFail(res, "users", req.params.id);
   if (idx === -1) return;
-  const { name, designation, username, password, isAdmin, teamMemberId } = req.body;
+  const { name, designation, username, password, isAdmin, teamMemberId, permissions, canSeeMoney } = req.body;
   store.users[idx] = {
     ...store.users[idx],
     name, designation: designation || "",
     username: username.trim(),
     isAdmin: Boolean(isAdmin),
     teamMemberId: teamMemberId || "",
+    permissions: cleanPermissions(permissions),
+    canSeeMoney: Boolean(canSeeMoney),
     ...(password ? { password: bcrypt.hashSync(password, 10) } : {}),
   };
   save();
