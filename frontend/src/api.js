@@ -1,5 +1,6 @@
-const BASE = import.meta.env.VITE_API_URL
-  || (import.meta.env.PROD ? "https://backend-jqy8.onrender.com/api" : "http://localhost:3001/api");
+const BASE = import.meta.env.PROD
+  ? "https://backend-jqy8.onrender.com/api"
+  : "http://localhost:3001/api";
 
 const token = () => localStorage.getItem("samadhan_jwt");
 
