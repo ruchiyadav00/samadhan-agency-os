@@ -5,10 +5,21 @@ const bcrypt  = require("bcryptjs");
 const { store, save } = require("./db");
 
 const app        = express();
-const PORT       = 3001;
+const PORT       = process.env.PORT || 3001;
 const JWT_SECRET = "samadhan_jwt_secret_2024";
 
-app.use(cors({ origin: "http://localhost:5173", credentials: true }));
+const ALLOWED_ORIGINS = [
+  "http://localhost:5173",
+  "https://frontend-ov79.onrender.com",
+  ...(process.env.CORS_ORIGIN ? process.env.CORS_ORIGIN.split(",").map(s => s.trim()) : []),
+];
+app.use(cors({
+  origin: (origin, cb) => {
+    if (!origin || ALLOWED_ORIGINS.includes(origin)) return cb(null, true);
+    return cb(new Error("Not allowed by CORS: " + origin));
+  },
+  credentials: true,
+}));
 app.use(express.json());
 
 // ══════════════════════════════════════════════════════════════
@@ -323,9 +334,9 @@ app.delete("/api/users/:id", auth, adminOnly, (req, res) => {
 });
 
 // ══════════════════════════════════════════════════════════════
-//  START
+//  SERVER START
 // ══════════════════════════════════════════════════════════════
 app.listen(PORT, () => {
-  console.log(`\n🚀  Samadhan Agency OS  —  Backend API`);
+  console.log(`\n  Samadhan API running →`);
   console.log(`    http://localhost:${PORT}\n`);
 });
